@@ -59,19 +59,19 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("add", help="create a task (id auto-assigned unless --id)")
     p.add_argument("--id", default=None)
     _add_field_options(p, for_update=False)
-    p.add_argument("--who", default="foundry", choices=("foundry", "scott", "worker"), help="author of the initial-state event")
+    p.add_argument("--who", default="foundry", choices=("foundry", "operator", "worker"), help="author of the initial-state event")
     p.add_argument("--detail", default="", help="detail of the initial-state event")
 
     p = sub.add_parser("update", help="change task fields; bumps updated")
     p.add_argument("id")
     _add_field_options(p, for_update=True)
-    p.add_argument("--who", default="foundry", choices=("foundry", "scott", "worker"), help="author of the event a --state change appends")
+    p.add_argument("--who", default="foundry", choices=("foundry", "operator", "worker"), help="author of the event a --state change appends")
     p.add_argument("--detail", default="", help="detail of the event a --state change appends")
 
     p = sub.add_parser("event", help="append an event; a lifecycle-state name moves the task")
     p.add_argument("id")
     p.add_argument("name")
-    p.add_argument("--who", required=True, choices=("foundry", "scott", "worker"))
+    p.add_argument("--who", required=True, choices=("foundry", "operator", "worker"))
     p.add_argument("--detail", default="")
 
     sub.add_parser("list", help="all tasks")
