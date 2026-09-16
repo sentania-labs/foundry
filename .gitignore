@@ -1,13 +1,13 @@
 # Foundry runtime state never lives in this repository.
 # It belongs in $FOUNDRY_STATE_DIR (default ~/.local/state/foundry).
-state/
-var/
+/state/
+/var/
 *.sqlite
 *.sqlite-*
-ledger/
-bootstrap-evidence/
-operator-rules.md
-bootstrap-contract.md
+/ledger/
+/bootstrap-evidence/
+/operator-rules.md
+/bootstrap-contract.md
 
 # Python
 __pycache__/
