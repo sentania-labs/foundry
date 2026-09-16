@@ -226,6 +226,16 @@ def events_content_hash(events: list[Event]) -> str:
     return sha256_bytes(canonical.encode("utf-8"))
 
 
+def bundle_content_hash(tasks: list[dict[str, Any]], events: list[dict[str, Any]]) -> str:
+    """Hash of the Crucible bundle payload: canonical JSON (sorted keys, no
+    whitespace, UTF-8) of {"tasks": [...], "events": [...]}."""
+    canonical = json.dumps(
+        {"tasks": tasks, "events": events},
+        sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+    )
+    return sha256_bytes(canonical.encode("utf-8"))
+
+
 def transitions_content_hash(transitions: list[tuple[Any, ...]]) -> str:
     """Content hash of an ordered (task, from_state, to_state, ts, source, event_seq) list."""
     canonical = "\n".join(_canonical(list(t)) for t in transitions)

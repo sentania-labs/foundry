@@ -12,10 +12,11 @@ from foundry_ledger import db
 from foundry_ledger.cli import main
 
 FIXTURES = Path(__file__).parent / "fixtures"
-# Verbatim copy of ledger/tasks and ledger/events.jsonl from main at branch time.
-LEDGER_MAIN = FIXTURES / "ledger_main"
-# Same files with three malformed records made schema-valid (see test_import_export).
-LEDGER_REPAIRED = FIXTURES / "ledger_repaired"
+# Synthetic ledger in the real shape: EX-0001 and EX-0002 hand-written (quoted
+# timestamps, indented lists, a comment), EX-0003 and EX-0004 machine-written.
+LEDGER_CLEAN = FIXTURES / "ledger_clean"
+# Same set with EX-0003 carrying a shifted record (state null, blockers a string).
+LEDGER_SHIFTED = FIXTURES / "ledger_shifted"
 
 
 @pytest.fixture
@@ -37,9 +38,9 @@ def cli(db_path: Path) -> Callable[..., int]:
 
 @pytest.fixture
 def source(tmp_path: Path) -> Path:
-    """A writable copy of the repaired fixture so tests can point at real paths."""
+    """A writable copy of the clean fixture so tests can point at real paths."""
     dest = tmp_path / "source"
-    shutil.copytree(LEDGER_REPAIRED, dest)
+    shutil.copytree(LEDGER_CLEAN, dest)
     return dest
 
 

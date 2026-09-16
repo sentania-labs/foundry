@@ -1,0 +1,23 @@
+id: EX-0004
+title: Survey a prior-art tool for the example specification
+parent: EX-0003
+project: example
+repository: null
+scope: 'read-only: the tool''s public documentation'
+objective: Classify the tool's containment concepts for the example specification
+contract:
+  acceptance: survey answers purpose, license, containment mechanism, reusable concepts
+  verification:
+  - file and URL citations
+  constraints: the operator reads the report
+model: read-only
+harness: example-harness
+execution: example-harness (explore agent)
+state: proposed
+created: 2026-03-10 08:05 CDT
+updated: 2026-03-10 08:05 CDT
+refs: {}
+last_report: null
+evidence: []
+blockers: []
+decisions_pending: []

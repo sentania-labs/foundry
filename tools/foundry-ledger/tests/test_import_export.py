@@ -1,19 +1,16 @@
-"""Import the fixture copy of the real ledger and export it back.
+"""Import the fixture ledger and export it back.
 
 Normalization used for task YAML equality: both sides are parsed with
 yaml.safe_load and compared as Python objects. Key order is preserved by the
-export (README field order, which every source file already follows), so the
+export (README field order, which every source file follows), so the
 normalization only absorbs formatting: quoting style, comments, list indent,
-and line wrapping in the hand-written files FDY-0001..0004 and the mixed
-quoting in FDY-0006/0007. events.jsonl is compared byte for byte.
+and line wrapping in the hand-written files EX-0001 and EX-0002. The
+machine-written files EX-0003 and EX-0004 and events.jsonl are compared byte
+for byte.
 
-Why two fixture copies: on main, FDY-0006 and FDY-0007 carry `state: null`
-and FDY-0008 carries `state: session 451a530d` (fields shifted by one, with
-`blockers: proposed`). The contract mandates a CHECK on state, so those three
-records cannot enter the database as written. `ledger_main` is verbatim and
-proves the rejection is loud and atomic; `ledger_repaired` changes only those
-two lines per file (state -> proposed, blockers -> []) and proves the
-round trip.
+The shifted fixture reproduces a real defect seen in Foundry's own ledger
+(fields shifted by one, leaving state null and blockers a string). The state
+CHECK must reject it loudly and the import must write nothing.
 """
 
 from __future__ import annotations
@@ -27,7 +24,7 @@ import yaml
 
 from foundry_ledger import db, ledger
 from foundry_ledger.model import LedgerError
-from tests.conftest import LEDGER_MAIN, LEDGER_REPAIRED
+from tests.conftest import LEDGER_CLEAN, LEDGER_SHIFTED
 
 
 def _yaml_files(directory: Path) -> list[Path]:
@@ -36,10 +33,10 @@ def _yaml_files(directory: Path) -> list[Path]:
 
 def test_import_counts_and_manifest(imported: Path, db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
-    assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 8
-    assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 17
+    assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 4
+    assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 11
     manifest = conn.execute("SELECT kind, record_count FROM import_manifest").fetchall()
-    assert sorted(manifest) == sorted([("task", 1)] * 8 + [("events", 17), ("transitions", 12)])
+    assert sorted(manifest) == sorted([("task", 1)] * 4 + [("events", 11), ("transitions", 8)])
 
 
 def test_export_round_trip_equals_source(imported: Path, cli: Callable[..., int], tmp_path: Path) -> None:
@@ -55,7 +52,7 @@ def test_export_round_trip_equals_source(imported: Path, cli: Callable[..., int]
         if s.read_bytes() == o.read_bytes():
             byte_equal.append(s.name)
     # The machine-written source files come back byte for byte.
-    assert "FDY-0005.yaml" in byte_equal and "FDY-0008.yaml" in byte_equal
+    assert byte_equal == ["EX-0003.yaml", "EX-0004.yaml"]
     assert (out / "events.jsonl").read_bytes() == (imported / "events.jsonl").read_bytes()
 
 
@@ -75,20 +72,20 @@ def test_export_of_reexport_is_stable(imported: Path, cli: Callable[..., int], t
     assert (first / "events.jsonl").read_bytes() == (second / "events.jsonl").read_bytes()
 
 
-def test_verbatim_main_fixture_is_rejected_atomically(cli: Callable[..., int], db_path: Path) -> None:
+def test_shifted_record_is_rejected_atomically(cli: Callable[..., int], db_path: Path) -> None:
     assert cli("init") == 0
     conn = db.connect(db_path)
-    with pytest.raises(LedgerError, match=r"FDY-0006.*state None"):
-        ledger.import_sources(conn, LEDGER_MAIN / "tasks", LEDGER_MAIN / "events.jsonl")
+    with pytest.raises(LedgerError, match=r"EX-0003.*state None"):
+        ledger.import_sources(conn, LEDGER_SHIFTED / "tasks", LEDGER_SHIFTED / "events.jsonl")
     assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0
     assert conn.execute("SELECT COUNT(*) FROM import_manifest").fetchone()[0] == 0
 
 
-def test_repaired_fixture_differs_from_main_only_in_state_and_blockers() -> None:
+def test_shifted_fixture_differs_from_clean_only_in_state_and_blockers() -> None:
     changed: dict[str, list[tuple[str, str]]] = {}
-    for m in _yaml_files(LEDGER_MAIN / "tasks"):
-        r = LEDGER_REPAIRED / "tasks" / m.name
+    for m in _yaml_files(LEDGER_CLEAN / "tasks"):
+        r = LEDGER_SHIFTED / "tasks" / m.name
         diffs = [
             (a, b)
             for a, b in zip(m.read_text().splitlines(), r.read_text().splitlines(), strict=True)
@@ -96,10 +93,9 @@ def test_repaired_fixture_differs_from_main_only_in_state_and_blockers() -> None
         ]
         if diffs:
             changed[m.name] = diffs
-    assert set(changed) == {"FDY-0006.yaml", "FDY-0007.yaml", "FDY-0008.yaml"}
-    for diffs in changed.values():
-        assert {b for _, b in diffs} == {"state: proposed", "blockers: []"}
-    assert (LEDGER_MAIN / "events.jsonl").read_bytes() == (LEDGER_REPAIRED / "events.jsonl").read_bytes()
+    assert set(changed) == {"EX-0003.yaml"}
+    assert {b for _, b in changed["EX-0003.yaml"]} == {"state: null", "blockers: proposed"}
+    assert (LEDGER_CLEAN / "events.jsonl").read_bytes() == (LEDGER_SHIFTED / "events.jsonl").read_bytes()
 
 
 def test_import_refuses_non_empty_ledger(imported: Path, cli: Callable[..., int]) -> None:
@@ -108,7 +104,7 @@ def test_import_refuses_non_empty_ledger(imported: Path, cli: Callable[..., int]
 
 def test_import_rejects_unknown_field_and_writes_nothing(cli: Callable[..., int], source: Path, db_path: Path) -> None:
     assert cli("init") == 0
-    path = source / "tasks" / "FDY-0001.yaml"
+    path = source / "tasks" / "EX-0001.yaml"
     path.write_text(path.read_text() + "extra_field: x\n")
     assert cli("import", "--tasks", str(source / "tasks"), "--events", str(source / "events.jsonl")) == 1
     conn = sqlite3.connect(db_path)
@@ -118,13 +114,13 @@ def test_import_rejects_unknown_field_and_writes_nothing(cli: Callable[..., int]
 def test_import_rejects_event_for_unknown_task(cli: Callable[..., int], source: Path) -> None:
     assert cli("init") == 0
     events = source / "events.jsonl"
-    events.write_text(events.read_text() + '{"ts": "2026-09-16 01:00 CDT", "task": "FDY-9999", "event": "x", "who": "foundry", "detail": ""}\n')
+    events.write_text(events.read_text() + '{"ts": "2026-09-16 01:00 CDT", "task": "EX-9999", "event": "x", "who": "foundry", "detail": ""}\n')
     assert cli("import", "--tasks", str(source / "tasks"), "--events", str(events)) == 1
 
 
 def test_import_rejects_filename_id_mismatch(cli: Callable[..., int], source: Path) -> None:
     assert cli("init") == 0
-    (source / "tasks" / "FDY-0001.yaml").rename(source / "tasks" / "FDY-0099.yaml")
+    (source / "tasks" / "EX-0001.yaml").rename(source / "tasks" / "EX-0099.yaml")
     assert cli("import", "--tasks", str(source / "tasks"), "--events", str(source / "events.jsonl")) == 1
 
 
@@ -146,12 +142,12 @@ def test_import_rejects_blank_lines_crlf_and_missing_trailing_newline(cli: Calla
 
 def test_import_rejects_stray_files_in_tasks_dir(cli: Callable[..., int], source: Path) -> None:
     assert cli("init") == 0
-    (source / "tasks" / "FDY-0099.yml").write_text("id: FDY-0099\n")
+    (source / "tasks" / "EX-0099.yml").write_text("id: EX-0099\n")
     assert cli("import", "--tasks", str(source / "tasks"), "--events", str(source / "events.jsonl")) == 1
 
 
 def test_import_rejects_wrong_json_field_shape(cli: Callable[..., int], source: Path) -> None:
     assert cli("init") == 0
-    path = source / "tasks" / "FDY-0005.yaml"
+    path = source / "tasks" / "EX-0004.yaml"
     path.write_text(path.read_text().replace("blockers: []", "blockers: proposed"))
     assert cli("import", "--tasks", str(source / "tasks"), "--events", str(source / "events.jsonl")) == 1

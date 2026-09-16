@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,7 @@ from .model import (
     VALID_STATES,
     Event,
     LedgerError,
+    bundle_content_hash,
     check_state,
     dump_json,
     event_line,
@@ -89,6 +92,44 @@ def list_transitions(conn: sqlite3.Connection, task_id: str) -> list[dict[str, A
         (task_id,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------- write guard
+
+
+def migrated_marker(conn: sqlite3.Connection) -> str | None:
+    """The Crucible import id if this ledger has been handed off, else None."""
+    row = conn.execute("SELECT crucible_import FROM migrated WHERE id = 1").fetchone()
+    return None if row is None else str(row["crucible_import"])
+
+
+@contextmanager
+def _write(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """A write transaction that refuses once the ledger is marked migrated.
+
+    The check runs inside BEGIN IMMEDIATE so a concurrent mark cannot slip
+    between the check and the write.
+    """
+    with transaction(conn):
+        marker = migrated_marker(conn)
+        if marker is not None:
+            raise LedgerError(
+                f"ledger is frozen: migrated to Crucible as import {marker}; writes refused"
+            )
+        yield conn
+
+
+def mark_migrated(conn: sqlite3.Connection, crucible_import: str) -> str:
+    """Record the handoff. One-way: a second call refuses like any other write."""
+    if not crucible_import.strip():
+        raise LedgerError("--crucible-import must not be empty")
+    stamp = now_local()
+    with _write(conn):
+        conn.execute(
+            "INSERT INTO migrated (id, crucible_import, marked_at) VALUES (1, ?, ?)",
+            (crucible_import, stamp),
+        )
+    return stamp
 
 
 # ---------------------------------------------------------------- writes
@@ -170,7 +211,7 @@ def add_task(
         if key not in TASK_FIELDS:
             raise LedgerError(f"unknown task field {key!r}")
         record[key] = value
-    with transaction(conn):
+    with _write(conn):
         if not record["id"]:
             record["id"] = next_task_id(conn)
         record = validate_task(record, f"add {record['id']}")
@@ -207,7 +248,7 @@ def update_task(
         if key in ("id", "created", "updated"):
             raise LedgerError(f"field {key!r} cannot be changed with update")
     now = now_local()
-    with transaction(conn):
+    with _write(conn):
         current = get_task(conn, task_id)
         merged = dict(current)
         merged.update({k: v for k, v in changes.items() if k != "state"})
@@ -237,7 +278,7 @@ def append_event(
         {"ts": stamp, "task": task_id, "event": name, "who": who, "detail": detail},
         "event",
     )
-    with transaction(conn):
+    with _write(conn):
         get_task(conn, task_id)
         seq = _insert_event(conn, event)
         if name in VALID_STATES:
@@ -311,7 +352,7 @@ def import_sources(conn: sqlite3.Connection, tasks_dir: Path, events_file: Path)
             raise LedgerError(f"{events_file}:{i}: event for unknown task {ev.task}")
 
     imported_at = now_local()
-    with transaction(conn):
+    with _write(conn):
         for table in ("tasks", "events", "import_manifest"):
             if conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():
                 raise LedgerError(
@@ -437,6 +478,56 @@ def export(conn: sqlite3.Connection, out_dir: Path, *, force: bool = False) -> d
         (tasks_dir / f"{record['id']}.yaml").write_text(task_yaml(record), encoding="utf-8")
     events_path.write_text(events_jsonl(events), encoding="utf-8")
     return {"tasks": len(tasks), "events": len(events)}
+
+
+# ---------------------------------------------------------------- crucible bundle
+
+BUNDLE_SCHEMA_VERSION = "1.0"
+
+
+def _tool_version() -> str:
+    try:
+        return version("foundry-ledger")
+    except PackageNotFoundError:  # pragma: no cover
+        return "unknown"
+
+
+def crucible_bundle(conn: sqlite3.Connection, db_path: Path) -> dict[str, Any]:
+    """The handoff bundle: every task and event, counts, and a content hash.
+
+    `content_sha256` covers the canonical JSON of tasks plus events (see
+    model.bundle_content_hash) so the receiver can recompute it without the
+    `source` block, whose `exported_at` changes on every run.
+    """
+    tasks = list_tasks(conn)
+    rows = conn.execute("SELECT seq, ts, task, event, who, detail FROM events ORDER BY seq")
+    events = [dict(r) for r in rows]
+    return {
+        "schema_version": BUNDLE_SCHEMA_VERSION,
+        "source": {
+            "tool": f"foundry-ledger {_tool_version()}",
+            "db_sha256": sha256_bytes(db_path.read_bytes()),
+            "exported_at": now_local(),
+        },
+        "tasks": tasks,
+        "events": events,
+        "counts": {"tasks": len(tasks), "events": len(events)},
+        "content_sha256": bundle_content_hash(tasks, events),
+    }
+
+
+def export_crucible(
+    conn: sqlite3.Connection, db_path: Path, out_dir: Path, *, force: bool = False
+) -> dict[str, int]:
+    """Write out_dir/crucible.json. Never overwrites unless forced."""
+    target = out_dir / "crucible.json"
+    if target.exists() and not force:
+        raise LedgerError(f"refusing to overwrite {target}; pass --force")
+    bundle = crucible_bundle(conn, db_path)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(bundle, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    counts: dict[str, int] = bundle["counts"]
+    return counts
 
 
 # ---------------------------------------------------------------- helpers for the CLI

@@ -1,0 +1,26 @@
+id: EX-0003
+title: Publish the example project as a public repository
+parent: null
+project: example
+repository: /opt/example/widget
+scope: public/private split of the example repository, new remote, first push, and
+  a sanitized set of examples
+objective: The repository exists on the forge, public, with README, CONTRIBUTING,
+  SECURITY; no private state in contents or history
+contract:
+  acceptance:
+  - secret scan clean over the full history
+  - manual inspection of every file in every commit
+  verification: the operator reviews the pushed repository
+  constraints: No push before scan and inspection; the operator's go recorded in events.jsonl
+model: example-model-1
+harness: example-harness
+execution: example-harness session delta
+state: null
+created: 2026-03-10 08:00 CDT
+updated: 2026-03-10 08:00 CDT
+refs: {}
+last_report: null
+evidence: []
+blockers: proposed
+decisions_pending: []

@@ -11,7 +11,7 @@ def test_verify_passes_after_import(imported: Path, cli: Callable[..., int]) -> 
 
 def test_verify_fails_after_editing_a_task_row(imported: Path, cli: Callable[..., int], db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
-    conn.execute("UPDATE tasks SET title = 'tampered' WHERE id = 'FDY-0002'")
+    conn.execute("UPDATE tasks SET title = 'tampered' WHERE id = 'EX-0002'")
     conn.commit()
     assert cli("verify") == 1
 
@@ -26,7 +26,7 @@ def test_verify_fails_after_editing_an_event_row(imported: Path, cli: Callable[.
 def test_verify_fails_after_deleting_a_task(imported: Path, cli: Callable[..., int], db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("DELETE FROM tasks WHERE id = 'FDY-0008'")  # no events reference it
+    conn.execute("DELETE FROM tasks WHERE id = 'EX-0004'")  # no events reference it
     conn.commit()
     assert cli("verify") == 1
 
@@ -42,7 +42,7 @@ def test_verify_fails_after_reordering_events(imported: Path, cli: Callable[...,
 
 
 def test_verify_still_passes_after_appending_a_new_event(imported: Path, cli: Callable[..., int]) -> None:
-    assert cli("event", "FDY-0005", "note", "--who", "foundry", "--detail", "post-import") == 0
+    assert cli("event", "EX-0003", "note", "--who", "foundry", "--detail", "post-import") == 0
     assert cli("verify") == 0
 
 
@@ -60,10 +60,10 @@ def test_verify_fails_after_deleting_transitions(imported: Path, cli: Callable[.
 
 def test_verify_fails_after_reordering_json_keys(imported: Path, cli: Callable[..., int], db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
-    conn.execute("""UPDATE tasks SET contract = '{"verification": "x", "acceptance": "y"}' WHERE id = 'FDY-0003'""")
+    conn.execute("""UPDATE tasks SET contract = '{"verification": "x", "acceptance": "y"}' WHERE id = 'EX-0002'""")
     conn.commit()
     assert cli("verify") == 1
-    conn.execute("""UPDATE tasks SET contract = '{"acceptance": "y", "verification": "x"}' WHERE id = 'FDY-0003'""")
+    conn.execute("""UPDATE tasks SET contract = '{"acceptance": "y", "verification": "x"}' WHERE id = 'EX-0002'""")
     conn.commit()
     assert cli("verify") == 1  # still differs from the source content
 

@@ -79,9 +79,18 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("show", help="one task with its events and transitions")
     p.add_argument("id")
 
-    p = sub.add_parser("export", help="write tasks/*.yaml and events.jsonl")
+    p = sub.add_parser("export", help="write tasks/*.yaml and events.jsonl, or a Crucible bundle")
     p.add_argument("--dir", required=True, metavar="DIR")
+    p.add_argument(
+        "--format",
+        choices=("yaml", "crucible"),
+        default="yaml",
+        help="yaml: source shape (default); crucible: DIR/crucible.json handoff bundle",
+    )
     p.add_argument("--force", action="store_true", help="overwrite an existing export")
+
+    p = sub.add_parser("mark-migrated", help="freeze the ledger after a Crucible import (one-way)")
+    p.add_argument("--crucible-import", required=True, metavar="ID")
     return parser
 
 
@@ -182,8 +191,18 @@ def run(argv: Sequence[str] | None = None) -> int:
             for t in ledger.list_transitions(conn, args.id):
                 print(f"  {t['ts']}  {t['from_state']} -> {t['to_state']}  [{t['source']}]")
         elif cmd == "export":
-            counts = ledger.export(conn, Path(args.dir), force=args.force)
-            print(f"exported {counts['tasks']} tasks, {counts['events']} events to {args.dir}")
+            if args.format == "crucible":
+                counts = ledger.export_crucible(conn, path, Path(args.dir), force=args.force)
+                print(
+                    f"exported crucible bundle: {counts['tasks']} tasks,"
+                    f" {counts['events']} events to {Path(args.dir) / 'crucible.json'}"
+                )
+            else:
+                counts = ledger.export(conn, Path(args.dir), force=args.force)
+                print(f"exported {counts['tasks']} tasks, {counts['events']} events to {args.dir}")
+        elif cmd == "mark-migrated":
+            stamp = ledger.mark_migrated(conn, args.crucible_import)
+            print(f"ledger frozen at {stamp}: migrated to Crucible as import {args.crucible_import}")
         else:  # pragma: no cover
             parser.error(f"unknown command {cmd}")
     finally:

@@ -1,0 +1,27 @@
+id: EX-0001
+title: Bootstrap the example project
+parent: null
+project: example
+repository: /opt/example/widget
+scope: docs/, config/, root shims
+objective: Establish the example project's identity, ledger, and delivery policy so that later tasks can be delegated with confidence.
+contract:
+  acceptance:
+    - docs/identity.md exists and describes the operator's responsibilities
+    - ledger format documented and every task carries the mandated fields
+  verification: the operator reviews the repository and records the result
+  constraints: no implementation code
+model: example-model-1
+harness: example-harness
+execution: example-harness session alpha
+state: done
+created: "2026-03-01 09:00 CST"
+updated: "2026-03-10 08:05 CDT"
+refs:
+  branch: main
+last_report: All bootstrap items complete; awaiting the operator's review of the repository
+evidence:
+  - docs/identity.md
+blockers: []   # was EX-0002, cleared 2026-03-02 09:15 CST
+decisions_pending:
+  - Whether to publish the example repository (outward-facing, so it waits for the operator's word)

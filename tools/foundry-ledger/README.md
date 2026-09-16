@@ -32,6 +32,8 @@ Database path: `--db PATH`, else `$FOUNDRY_LEDGER_DB`, else
 | `live` | Tasks whose state is not `done` or `abandoned`. |
 | `show ID` | The task as YAML, then its events and transitions. |
 | `export --dir DIR [--force]` | Write `DIR/tasks/<id>.yaml` and `DIR/events.jsonl` in the source shape. Refuses to overwrite without `--force`. |
+| `export --format crucible --dir DIR [--force]` | Write `DIR/crucible.json`, the handoff bundle for Crucible (below). |
+| `mark-migrated --crucible-import ID` | Freeze the ledger after Crucible has imported it. One-way: from then on every write command (`import`, `add`, `update`, `event`, `mark-migrated`) refuses and names `ID`; reads, `verify`, and both exports keep working. |
 
 Every write is one transaction. `list`, `live`, `show`, `verify`, and
 `export` open the database read-only. Timestamps are written as
@@ -40,6 +42,19 @@ source files, and the schema rejects anything else.
 
 Valid states (from `ledger/README.md`): `proposed`, `dispatched`, `running`,
 `reported`, `accepted`, `rejected`, `blocked`, `missing`, `abandoned`, `done`.
+
+## Crucible bundle
+
+`export --format crucible` writes one JSON document:
+
+| Key | Content |
+| --- | --- |
+| schema_version | `"1.0"` |
+| source | `tool` (name and version), `db_sha256` (hash of the database file bytes), `exported_at` (local timestamp) |
+| tasks | every task record, id order, same fields as the YAML |
+| events | every event in `seq` order, with `seq` |
+| counts | `tasks`, `events` |
+| content_sha256 | sha256 of the canonical JSON of `{"tasks": [...], "events": [...]}`: keys sorted, separators `,` and `:`, UTF-8, no whitespace. Recomputable by the receiver from `tasks` and `events` alone. |
 
 ## Schema
 
@@ -83,6 +98,14 @@ state, chained per task in file order (`from_state` is the previous derived
 state, null for the first). After import, `from_state` is the task's current
 state at the time of the change.
 
+### migrated
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| id | INTEGER PK | always 1; at most one row |
+| crucible_import | TEXT NOT NULL | the id Crucible assigned to its import |
+| marked_at | TEXT NOT NULL | local timestamp |
+
 ### import_manifest
 
 | Column | Type | Notes |
@@ -117,5 +140,6 @@ uv run pytest
 uv run mypy --strict foundry_ledger
 ```
 
-Tests use a temp database and fixture copies of the real ledger files under
-`tests/fixtures/`.
+Tests use a temp database and synthetic fixtures under `tests/fixtures/`
+(`ledger_clean`, and `ledger_shifted` with one deliberately malformed record
+that the state CHECK must reject).

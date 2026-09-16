@@ -1,0 +1,23 @@
+id: EX-0002
+title: Verify the example resumes in each harness
+parent: EX-0001
+project: example
+repository: /opt/example/widget
+scope: docs/harness only, plus ledger updates
+objective: In each harness, start a session, confirm it loads the identity file, and report live tasks correctly.
+contract:
+  acceptance: docs/harness.md has a dated entry per harness with the observed output
+  verification: the operator can re-run the recorded command and see the same behavior
+  constraints: read-only sessions
+model: null
+harness: harness-a, harness-b
+execution: harness-a session beta; harness-b session gamma
+state: done
+created: "2026-03-01 09:05 CST"
+updated: "2026-03-02 09:15 CST"
+refs: {}
+last_report: null
+evidence:
+  - docs/harness.md
+blockers: []
+decisions_pending: []
