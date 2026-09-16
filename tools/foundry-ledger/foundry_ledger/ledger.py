@@ -12,7 +12,9 @@ from typing import Any
 
 import yaml
 
-from .db import transaction
+import os
+
+from .db import require_migrated, transaction
 from .model import (
     CLOSED_STATES,
     JSON_FIELDS,
@@ -110,6 +112,7 @@ def _write(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     The check runs inside BEGIN IMMEDIATE so a concurrent mark cannot slip
     between the check and the write.
     """
+    require_migrated(conn)
     with transaction(conn):
         marker = migrated_marker(conn)
         if marker is not None:
@@ -121,7 +124,8 @@ def _write(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
 
 def mark_migrated(conn: sqlite3.Connection, crucible_import: str) -> str:
     """Record the handoff. One-way: a second call refuses like any other write."""
-    if not crucible_import.strip():
+    crucible_import = crucible_import.strip()
+    if not crucible_import:
         raise LedgerError("--crucible-import must not be empty")
     stamp = now_local()
     with _write(conn):
@@ -498,16 +502,28 @@ def crucible_bundle(conn: sqlite3.Connection, db_path: Path) -> dict[str, Any]:
     `content_sha256` covers the canonical JSON of tasks plus events (see
     model.bundle_content_hash) so the receiver can recompute it without the
     `source` block, whose `exported_at` changes on every run.
+
+    The rows and the file bytes are read inside one deferred transaction so
+    the SHARED lock holds off writers: `db_sha256` describes exactly the
+    database state the rows came from.
     """
-    tasks = list_tasks(conn)
-    rows = conn.execute("SELECT seq, ts, task, event, who, detail FROM events ORDER BY seq")
-    events = [dict(r) for r in rows]
+    require_migrated(conn)
+    conn.execute("BEGIN")
+    try:
+        tasks = list_tasks(conn)
+        rows = conn.execute("SELECT seq, ts, task, event, who, detail FROM events ORDER BY seq")
+        events = [dict(r) for r in rows]
+        marker = migrated_marker(conn)
+        db_bytes = db_path.read_bytes()
+    finally:
+        conn.execute("COMMIT")
     return {
         "schema_version": BUNDLE_SCHEMA_VERSION,
         "source": {
             "tool": f"foundry-ledger {_tool_version()}",
-            "db_sha256": sha256_bytes(db_path.read_bytes()),
+            "db_sha256": sha256_bytes(db_bytes),
             "exported_at": now_local(),
+            "migrated": marker,
         },
         "tasks": tasks,
         "events": events,
@@ -525,7 +541,9 @@ def export_crucible(
         raise LedgerError(f"refusing to overwrite {target}; pass --force")
     bundle = crucible_bundle(conn, db_path)
     out_dir.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(bundle, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp = out_dir / "crucible.json.tmp"
+    tmp.write_text(json.dumps(bundle, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp, target)  # a crash mid-write cannot leave a partial crucible.json
     counts: dict[str, int] = bundle["counts"]
     return counts
 

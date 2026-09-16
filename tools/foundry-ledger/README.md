@@ -50,11 +50,11 @@ Valid states (from `ledger/README.md`): `proposed`, `dispatched`, `running`,
 | Key | Content |
 | --- | --- |
 | schema_version | `"1.0"` |
-| source | `tool` (name and version), `db_sha256` (hash of the database file bytes), `exported_at` (local timestamp) |
+| source | `tool` (name and version), `db_sha256` (hash of the database file bytes, read under the same lock as the rows), `exported_at` (local timestamp), `migrated` (the Crucible import id if the ledger is frozen, else null) |
 | tasks | every task record, id order, same fields as the YAML |
 | events | every event in `seq` order, with `seq` |
 | counts | `tasks`, `events` |
-| content_sha256 | sha256 of the canonical JSON of `{"tasks": [...], "events": [...]}`: keys sorted, separators `,` and `:`, UTF-8, no whitespace. Recomputable by the receiver from `tasks` and `events` alone. |
+| content_sha256 | sha256 of the canonical JSON of `{"tasks": [...], "events": [...]}`, recomputable by the receiver from `tasks` and `events` alone. Canonical form is exactly Python `json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":"))` encoded as UTF-8: keys sorted by code point at every level, no whitespace, non-ASCII characters emitted raw (not `\uXXXX`), control characters and `"` and `\` escaped as JSON requires, no HTML escaping of `<`, `>`, `&`, `null`/`true`/`false` lower case, integers without exponent. |
 
 ## Schema
 

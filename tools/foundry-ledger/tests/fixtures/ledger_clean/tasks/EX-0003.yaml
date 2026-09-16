@@ -6,13 +6,14 @@ repository: /opt/example/widget
 scope: public/private split of the example repository, new remote, first push, and
   a sanitized set of examples
 objective: The repository exists on the forge, public, with README, CONTRIBUTING,
-  SECURITY; no private state in contents or history
+  SECURITY; nothing private in the tree or the history
 contract:
   acceptance:
   - secret scan clean over the full history
-  - manual inspection of every file in every commit
+  - every file in every commit read by a person
   verification: the operator reviews the pushed repository
-  constraints: No push before scan and inspection; the operator's go recorded in events.jsonl
+  constraints: Scan and read first, push second; the operator's go is recorded in
+    events.jsonl
 model: example-model-1
 harness: example-harness
 execution: example-harness session delta

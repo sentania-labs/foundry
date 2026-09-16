@@ -5,7 +5,7 @@
 {"ts": "2026-03-02 09:15 CST", "task": "EX-0002", "event": "done", "who": "operator", "detail": "both harnesses passed; evidence in docs/harness.md"}
 {"ts": "2026-03-02 09:15 CST", "task": "EX-0001", "event": "unblocked", "who": "operator", "detail": "EX-0002 done"}
 {"ts": "2026-03-02 17:30 CST", "task": "EX-0001", "event": "reported", "who": "operator", "detail": "bootstrap complete pending the operator's review"}
-{"ts": "2026-03-10 08:00 CDT", "task": "EX-0001", "event": "accepted", "who": "operator", "detail": "Bootstrap is accepted and verified. Proceed to EX-0003."}
-{"ts": "2026-03-10 08:00 CDT", "task": "EX-0003", "event": "go", "who": "operator", "detail": "Add a remote and publish. Before the first push, inspect the complete repository contents and history for private information."}
+{"ts": "2026-03-10 08:00 CDT", "task": "EX-0001", "event": "accepted", "who": "operator", "detail": "Bootstrap looks good to me. Move on to EX-0003 when ready."}
+{"ts": "2026-03-10 08:00 CDT", "task": "EX-0003", "event": "go", "who": "operator", "detail": "Set up the remote and publish. Read every file and every commit for private material first."}
 {"ts": "2026-03-10 08:05 CDT", "task": "EX-0003", "event": "proposed", "who": "operator", "detail": "publication task opened after the go"}
 {"ts": "2026-03-10 08:05 CDT", "task": "EX-0001", "event": "done", "who": "operator", "detail": "closed"}

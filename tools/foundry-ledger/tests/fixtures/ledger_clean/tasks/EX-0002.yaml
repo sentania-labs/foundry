@@ -6,8 +6,8 @@ repository: /opt/example/widget
 scope: docs/harness only, plus ledger updates
 objective: In each harness, start a session, confirm it loads the identity file, and report live tasks correctly.
 contract:
-  acceptance: docs/harness.md has a dated entry per harness with the observed output
-  verification: the operator can re-run the recorded command and see the same behavior
+  acceptance: docs/harness.md lists each harness with the output seen
+  verification: the operator repeats the listed command and gets matching output
   constraints: read-only sessions
 model: null
 harness: harness-a, harness-b

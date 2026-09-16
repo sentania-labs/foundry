@@ -7,8 +7,8 @@ scope: docs/, config/, root shims
 objective: Establish the example project's identity, ledger, and delivery policy so that later tasks can be delegated with confidence.
 contract:
   acceptance:
-    - docs/identity.md exists and describes the operator's responsibilities
-    - ledger format documented and every task carries the mandated fields
+    - docs/identity.md exists and names the operator's duties
+    - each task file has the full field set
   verification: the operator reviews the repository and records the result
   constraints: no implementation code
 model: example-model-1
