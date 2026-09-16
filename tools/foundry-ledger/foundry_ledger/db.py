@@ -19,19 +19,27 @@ MIGRATION_RE = re.compile(r"^(\d{4})_([A-Za-z0-9_]+)\.sql$")
 
 def resolve_db_path(explicit: str | None) -> Path:
     """--db wins, then FOUNDRY_LEDGER_DB, then ~/.local/state/foundry/ledger.sqlite."""
-    if explicit:
+    if explicit is not None:
+        if explicit == "":
+            raise LedgerError("--db is empty")
         return Path(explicit).expanduser()
     env = os.environ.get(ENV_VAR)
-    if env:
+    if env is not None:
+        if env == "":
+            raise LedgerError(f"{ENV_VAR} is set but empty")
         return Path(env).expanduser()
     return Path.home() / DEFAULT_RELATIVE
 
 
-def connect(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
-    """Open the ledger. Transactions are explicit (see `transaction`)."""
+def connect(path: Path, *, readonly: bool = False, create: bool = False) -> sqlite3.Connection:
+    """Open the ledger. Transactions are explicit (see `transaction`).
+
+    Only `init` passes create=True; every other command refuses a missing
+    file rather than letting sqlite3 leave an empty one behind.
+    """
+    if not path.exists() and not create:
+        raise LedgerError(f"no ledger at {path}; run 'foundry-ledger init' first")
     if readonly:
-        if not path.exists():
-            raise LedgerError(f"no ledger at {path}; run 'foundry-ledger init' first")
         uri = path.resolve().as_uri() + "?mode=ro"
         conn = sqlite3.connect(uri, uri=True, isolation_level=None)
     else:
@@ -123,8 +131,12 @@ def migrate(conn: sqlite3.Connection) -> list[int]:
 
 def init(path: Path) -> tuple[sqlite3.Connection, list[int]]:
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = connect(path)
-    return conn, migrate(conn)
+    conn = connect(path, create=True)
+    try:
+        return conn, migrate(conn)
+    except BaseException:
+        conn.close()
+        raise
 
 
 def require_migrated(conn: sqlite3.Connection) -> None:

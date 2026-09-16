@@ -63,7 +63,7 @@ CREATE INDEX state_transitions_task ON state_transitions (task, id);
 CREATE TABLE import_manifest (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     source_path    TEXT NOT NULL,
-    kind           TEXT NOT NULL CHECK (kind IN ('task', 'events')),
+    kind           TEXT NOT NULL CHECK (kind IN ('task', 'events', 'transitions')),
     record_id      TEXT,
     source_sha256  TEXT NOT NULL,
     content_sha256 TEXT NOT NULL,

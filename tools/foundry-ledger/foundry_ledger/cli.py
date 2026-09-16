@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -58,6 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("add", help="create a task (id auto-assigned unless --id)")
     p.add_argument("--id", default=None)
     _add_field_options(p, for_update=False)
+    p.add_argument("--who", default="foundry", choices=("foundry", "scott", "worker"), help="author of the initial-state event")
+    p.add_argument("--detail", default="", help="detail of the initial-state event")
 
     p = sub.add_parser("update", help="change task fields; bumps updated")
     p.add_argument("id")
@@ -95,6 +98,8 @@ def _collect_fields(args: argparse.Namespace) -> dict[str, Any]:
     for field in getattr(args, "clear", []):
         if field not in ledger.scalar_fields_for_cli() or field == "state":
             raise LedgerError(f"--clear: {field!r} is not a nullable scalar field")
+        if field in fields:
+            raise LedgerError(f"--clear {field} conflicts with {_opt(field)}")
         fields[field] = None
     return fields
 
@@ -121,11 +126,11 @@ def run(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if cmd == "migrate":
-        if not path.exists():
-            raise LedgerError(f"no ledger at {path}; run 'foundry-ledger init' first")
         conn = db.connect(path)
-        applied = db.migrate(conn)
-        conn.close()
+        try:
+            applied = db.migrate(conn)
+        finally:
+            conn.close()
         print(f"{path}: applied migrations {applied or 'none (up to date)'}")
         return 0
 
@@ -135,7 +140,10 @@ def run(argv: Sequence[str] | None = None) -> int:
         db.require_migrated(conn)
         if cmd == "import":
             counts = ledger.import_sources(conn, Path(args.tasks), Path(args.events))
-            print(f"imported {counts['tasks']} tasks, {counts['events']} events")
+            print(
+                f"imported {counts['tasks']} tasks, {counts['events']} events,"
+                f" {counts['transitions']} derived transitions"
+            )
         elif cmd == "verify":
             problems = ledger.verify(conn)
             if problems:
@@ -148,7 +156,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             fields = _collect_fields(args)
             if args.id:
                 fields["id"] = args.id
-            record = ledger.add_task(conn, fields)
+            record = ledger.add_task(conn, fields, who=args.who, detail=args.detail)
             print(record["id"])
         elif cmd == "update":
             changes = _collect_fields(args)
@@ -188,6 +196,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run(argv)
     except LedgerError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except sqlite3.Error as exc:
+        print(f"error: database: {exc}", file=sys.stderr)
         return 1
 
 

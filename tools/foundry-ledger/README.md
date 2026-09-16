@@ -25,9 +25,9 @@ Database path: `--db PATH`, else `$FOUNDRY_LEDGER_DB`, else
 | `migrate` | Apply pending migrations in order. Idempotent; refuses a renamed or unknown migration. |
 | `import --tasks DIR --events FILE` | Load `DIR/*.yaml` and `FILE` into an empty ledger in one transaction. Every file is validated first; any problem aborts with nothing written. Refuses a ledger that already holds rows. |
 | `verify` | Recount and rehash the imported records against `import_manifest`. Exit 0 when intact, 1 on any mismatch. |
-| `add [--id ID] [--title ...] [--contract JSON] ...` | Create a task. Id defaults to the next `FDY-NNNN`, state to `proposed`, timestamps to now. |
+| `add [--id ID] [--title ...] [--contract JSON] ... [--who W --detail D]` | Create a task and append an event named after its initial state. Id defaults to the next `FDY-NNNN`, state to `proposed`, timestamps to now. |
 | `update ID [--field value ...] [--clear FIELD] [--state S --who W --detail D]` | Change fields and bump `updated`. `--state` also appends an event named after the new state and records the transition. |
-| `event ID NAME --who W [--detail D]` | Append an event. If `NAME` is a lifecycle state the task moves to it and a transition is recorded. |
+| `event ID NAME --who W [--detail D]` | Append an event. If `NAME` is a lifecycle state the task moves to it and a transition is recorded. A move to the task's current state is rejected. |
 | `list` | All tasks: id, state, updated, title. |
 | `live` | Tasks whose state is not `done` or `abandoned`. |
 | `show ID` | The task as YAML, then its events and transitions. |
@@ -89,16 +89,26 @@ state at the time of the change.
 | --- | --- | --- |
 | id | INTEGER PK AUTOINCREMENT | |
 | source_path | TEXT NOT NULL | file imported |
-| kind | TEXT NOT NULL | `task` (one row per YAML file) or `events` |
+| kind | TEXT NOT NULL | `task` (one row per YAML file), `events`, or `transitions` (the derived rows) |
 | record_id | TEXT | task id for `task` rows |
 | source_sha256 | TEXT NOT NULL | hash of the raw source bytes |
 | content_sha256 | TEXT NOT NULL | hash of the canonical parsed content; what `verify` recomputes |
-| record_count | INTEGER NOT NULL | 1 per task, line count for events |
+| record_count | INTEGER NOT NULL | 1 per task, line count for events, derived row count for transitions |
 | imported_at | TEXT NOT NULL | local timestamp |
 
-`verify` covers the imported records only: appended events and new tasks
-are not checked, and an `update` to an imported task is reported as a
-mismatch by design (the manifest is a migration receipt).
+`verify` covers the imported records only: appended events, new tasks,
+and later transitions are not checked. Any change to an imported task,
+including a state move made by `update --state` or by a lifecycle-named
+`event`, is reported as a mismatch by design: the manifest is a migration
+receipt, and the intended sequence is import, verify, then start writing.
+JSON key order is part of the hashed content because the export reproduces it.
+
+Import is strict so nothing is coerced on the way in: every task file must
+carry exactly the README fields, scalars must be strings or null, `contract`
+and `refs` must be mappings, the list fields must be lists, timestamps and
+state must be valid, and `events.jsonl` must have one object per line with no
+blank lines, no CRLF, and a trailing newline. Any violation aborts the whole
+import with nothing written.
 
 ## Development
 

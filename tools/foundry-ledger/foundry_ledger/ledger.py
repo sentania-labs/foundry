@@ -27,6 +27,7 @@ from .model import (
     now_local,
     sha256_bytes,
     task_content_hash,
+    transitions_content_hash,
     validate_event,
     validate_task,
 )
@@ -124,10 +125,16 @@ def _insert_transition(
 def _set_state(
     conn: sqlite3.Connection, task_id: str, new_state: str, ts: str, source: str, event_seq: int
 ) -> None:
-    """Move a task to new_state, recording the transition. Caller owns the txn."""
+    """Move a task to new_state, recording the transition. Caller owns the txn.
+
+    `ts` is the transition time as recorded on the event; `updated` is always
+    the wall clock so a backdated event cannot move it backwards.
+    """
     current = get_task(conn, task_id)["state"]
+    if current == new_state:
+        raise LedgerError(f"task {task_id} is already {new_state}")
     conn.execute(
-        "UPDATE tasks SET state = ?, updated = ? WHERE id = ?", (new_state, ts, task_id)
+        "UPDATE tasks SET state = ?, updated = ? WHERE id = ?", (new_state, now_local(), task_id)
     )
     _insert_transition(conn, task_id, current, new_state, ts, source, event_seq)
 
@@ -142,8 +149,18 @@ def next_task_id(conn: sqlite3.Connection, prefix: str = "FDY") -> str:
     return f"{prefix}-{highest + 1:04d}"
 
 
-def add_task(conn: sqlite3.Connection, fields: Mapping[str, Any]) -> dict[str, Any]:
-    """Create a task. Missing scalars are null, missing JSON fields are empty."""
+def add_task(
+    conn: sqlite3.Connection,
+    fields: Mapping[str, Any],
+    *,
+    who: str = "foundry",
+    detail: str | None = "",
+) -> dict[str, Any]:
+    """Create a task and append an event named after its initial state.
+
+    Missing scalars are null, missing JSON fields are empty. The event gives
+    every task a history from its first state (transition null -> state).
+    """
     now = now_local()
     record: dict[str, Any] = {f: None for f in TASK_FIELDS}
     record.update({"contract": {}, "refs": {}, "evidence": [], "blockers": [],
@@ -160,6 +177,8 @@ def add_task(conn: sqlite3.Connection, fields: Mapping[str, Any]) -> dict[str, A
         if conn.execute("SELECT 1 FROM tasks WHERE id = ?", (record["id"],)).fetchone():
             raise LedgerError(f"task {record['id']} already exists")
         _insert_task(conn, record)
+        seq = _insert_event(conn, Event(now, record["id"], record["state"], who, detail))
+        _insert_transition(conn, record["id"], None, record["state"], now, "event", seq)
     return record
 
 
@@ -246,9 +265,12 @@ def _read_task_file(path: Path) -> tuple[bytes, dict[str, Any]]:
 def _read_events_file(path: Path) -> tuple[bytes, list[Event]]:
     raw = path.read_bytes()
     events: list[Event] = []
-    for lineno, line in enumerate(raw.decode("utf-8").split("\n"), start=1):
-        if line == "":
-            continue
+    text = raw.decode("utf-8")
+    if text and not text.endswith("\n"):
+        raise LedgerError(f"{path}: last line has no trailing newline")
+    for lineno, line in enumerate(text.split("\n")[:-1], start=1):
+        if line == "" or line.endswith("\r"):
+            raise LedgerError(f"{path}:{lineno}: blank line or CRLF line ending")
         try:
             obj = json.loads(line)
         except json.JSONDecodeError as exc:
@@ -271,6 +293,9 @@ def import_sources(conn: sqlite3.Connection, tasks_dir: Path, events_file: Path)
     task_files = sorted(p for p in tasks_dir.iterdir() if p.suffix == ".yaml" and p.is_file())
     if not task_files:
         raise LedgerError(f"no *.yaml task files in {tasks_dir}")
+    stray = sorted(p.name for p in tasks_dir.iterdir() if p.suffix != ".yaml")
+    if stray:
+        raise LedgerError(f"{tasks_dir}: only *.yaml files are imported; found {stray}")
 
     tasks: list[tuple[Path, bytes, dict[str, Any]]] = []
     seen: set[str] = set()
@@ -300,12 +325,13 @@ def import_sources(conn: sqlite3.Connection, tasks_dir: Path, events_file: Path)
                 (str(path), record["id"], sha256_bytes(raw), task_content_hash(record), imported_at),
             )
         last_state: dict[str, str] = {}
+        transitions: list[tuple[Any, ...]] = []
         for ev in events:
             seq = _insert_event(conn, ev)
             if ev.event in VALID_STATES:
-                _insert_transition(
-                    conn, ev.task, last_state.get(ev.task), ev.event, ev.ts, "event", seq
-                )
+                row = (ev.task, last_state.get(ev.task), ev.event, ev.ts, "event", seq)
+                _insert_transition(conn, *row)
+                transitions.append(row)
                 last_state[ev.task] = ev.event
         conn.execute(
             "INSERT INTO import_manifest (source_path, kind, record_id, source_sha256,"
@@ -313,7 +339,15 @@ def import_sources(conn: sqlite3.Connection, tasks_dir: Path, events_file: Path)
             (str(events_file), sha256_bytes(events_raw), events_content_hash(events),
              len(events), imported_at),
         )
-    return {"tasks": len(tasks), "events": len(events)}
+        # Derived data gets a receipt too, hashed over the same rows just written.
+        conn.execute(
+            "INSERT INTO import_manifest (source_path, kind, record_id, source_sha256,"
+            " content_sha256, record_count, imported_at)"
+            " VALUES (?, 'transitions', NULL, ?, ?, ?, ?)",
+            (str(events_file), sha256_bytes(events_raw), transitions_content_hash(transitions),
+             len(transitions), imported_at),
+        )
+    return {"tasks": len(tasks), "events": len(events), "transitions": len(transitions)}
 
 
 # ---------------------------------------------------------------- verify
@@ -354,6 +388,21 @@ def verify(conn: sqlite3.Connection) -> list[str]:
             actual = events_content_hash([row_to_event(r) for r in imported])
             if actual != row["content_sha256"]:
                 problems.append("events: content hash mismatch over imported sequence")
+        elif kind == "transitions":
+            expected_count = int(row["record_count"])
+            imported = conn.execute(
+                "SELECT task, from_state, to_state, ts, source, event_seq"
+                " FROM state_transitions ORDER BY id LIMIT ?",
+                (expected_count,),
+            ).fetchall()
+            if len(imported) != expected_count:
+                problems.append(
+                    f"transitions: count mismatch (manifest {expected_count}, found {len(imported)})"
+                )
+                continue
+            actual = transitions_content_hash([tuple(r) for r in imported])
+            if actual != row["content_sha256"]:
+                problems.append("transitions: content hash mismatch over imported sequence")
         else:
             problems.append(f"manifest row {row['id']}: unknown kind {kind!r}")
     return problems

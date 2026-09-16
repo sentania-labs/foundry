@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from foundry_ledger import db, ledger
+from foundry_ledger.cli import main
 from foundry_ledger.model import TIMESTAMP_RE, LedgerError, now_local
 
 STAMP = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} C[DS]T$")
@@ -119,13 +120,77 @@ def test_event_for_unknown_task_is_rejected(imported: Path, cli: Callable[..., i
     assert cli("event", "FDY-9999", "running", "--who", "foundry") == 1
 
 
-def test_add_auto_id_and_defaults(imported: Path, cli: Callable[..., int], db_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert cli("add", "--title", "New", "--project", "foundry", "--contract", '{"acceptance": ["x"]}') == 0
+def test_add_auto_id_defaults_and_initial_event(imported: Path, cli: Callable[..., int], db_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli("add", "--title", "New", "--project", "foundry", "--contract", '{"acceptance": ["x"]}', "--detail", "opened") == 0
     assert capsys.readouterr().out.strip() == "FDY-0009"
-    task = ledger.get_task(db.connect(db_path), "FDY-0009")
+    conn = db.connect(db_path)
+    task = ledger.get_task(conn, "FDY-0009")
     assert task["state"] == "proposed" and task["evidence"] == [] and task["parent"] is None
     assert task["contract"] == {"acceptance": ["x"]}
     assert task["created"] == task["updated"] and STAMP.match(task["created"])
+    events = ledger.list_events(conn, "FDY-0009")
+    assert [(e.event, e.who, e.detail, e.ts) for e in events] == [("proposed", "foundry", "opened", task["created"])]
+    t = ledger.list_transitions(conn, "FDY-0009")
+    assert [(x["from_state"], x["to_state"], x["source"]) for x in t] == [(None, "proposed", "event")]
+
+
+def test_add_with_explicit_state_records_that_state(imported: Path, db_path: Path) -> None:
+    conn = db.connect(db_path)
+    ledger.add_task(conn, {"id": "FDY-0050", "title": "t", "state": "running"}, who="worker")
+    assert [e.event for e in ledger.list_events(conn, "FDY-0050")] == ["running"]
+
+
+def test_no_op_state_change_is_rejected_and_writes_nothing(imported: Path, db_path: Path, cli: Callable[..., int]) -> None:
+    conn = db.connect(db_path)
+    events_before = len(ledger.list_events(conn))
+    with pytest.raises(LedgerError, match="already proposed"):
+        ledger.update_task(conn, "FDY-0005", {"state": "proposed"})
+    assert cli("event", "FDY-0005", "proposed", "--who", "foundry") == 1
+    assert len(ledger.list_events(conn)) == events_before
+    assert ledger.list_transitions(conn, "FDY-0005") == []
+
+
+def test_backdated_event_does_not_move_updated_backwards(imported: Path, db_path: Path) -> None:
+    conn = db.connect(db_path)
+    before = ledger.get_task(conn, "FDY-0005")["updated"]
+    ledger.append_event(conn, "FDY-0005", "running", who="worker", detail=None, ts="2020-01-01 00:00 CST")
+    task = ledger.get_task(conn, "FDY-0005")
+    assert task["updated"] >= before and task["state"] == "running"
+    assert ledger.list_transitions(conn, "FDY-0005")[0]["ts"] == "2020-01-01 00:00 CST"
+
+
+def test_python_timestamp_check_is_as_strict_as_sql(imported: Path, db_path: Path) -> None:
+    conn = db.connect(db_path)
+    for bad in ("2026-09-16 00:26 CDT\n", "\u0662026-09-16 00:26 CDT", "x2026-09-16 00:26 CDT"):
+        with pytest.raises(LedgerError, match="timestamp"):
+            ledger.append_event(conn, "FDY-0005", "note", who="foundry", detail=None, ts=bad)
+
+
+def test_json_field_shape_enforced_via_api(imported: Path, db_path: Path) -> None:
+    conn = db.connect(db_path)
+    with pytest.raises(LedgerError, match="must be a list"):
+        ledger.update_task(conn, "FDY-0005", {"blockers": "proposed"})
+    with pytest.raises(LedgerError, match="must be a dict"):
+        ledger.update_task(conn, "FDY-0005", {"refs": 5})
+    ledger.update_task(conn, "FDY-0005", {"refs": None, "blockers": None})
+
+
+def test_clear_conflicts_with_set(imported: Path, cli: Callable[..., int]) -> None:
+    assert cli("update", "FDY-0001", "--title", "x", "--clear", "title") == 1
+
+
+def test_missing_db_leaves_no_file(tmp_path: Path) -> None:
+    path = tmp_path / "typo.sqlite"
+    assert main(["--db", str(path), "add", "--title", "x"]) == 1
+    assert main(["--db", str(path), "migrate"]) == 1
+    assert not path.exists()
+
+
+def test_sqlite_errors_are_reported_not_raised(imported: Path, cli: Callable[..., int], db_path: Path) -> None:
+    conn = sqlite3.connect(db_path)
+    conn.execute("DROP TABLE state_transitions")
+    conn.commit()
+    assert cli("event", "FDY-0005", "running", "--who", "foundry") == 1
 
 
 def test_add_duplicate_id_rejected(imported: Path, cli: Callable[..., int]) -> None:
@@ -164,6 +229,17 @@ def test_write_failure_rolls_back_whole_transaction(imported: Path, db_path: Pat
     with pytest.raises(LedgerError):
         ledger.update_task(conn, "FDY-0005", {"title": "changed", "state": "bogus"})
     assert ledger.get_task(conn, "FDY-0005") == before
+
+
+def test_empty_db_path_is_an_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv(db.ENV_VAR, "")
+    with pytest.raises(LedgerError, match="empty"):
+        db.resolve_db_path(None)
+    with pytest.raises(LedgerError, match="empty"):
+        db.resolve_db_path("")
+    assert main(["--db", "", "list"]) == 1
+    assert not (tmp_path / ".local").exists()
 
 
 def test_db_path_resolution(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

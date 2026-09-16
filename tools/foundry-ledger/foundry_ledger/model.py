@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 LOCAL_ZONE: Final = ZoneInfo("America/Chicago")
 TIMESTAMP_FORMAT: Final = "%Y-%m-%d %H:%M %Z"
-TIMESTAMP_RE: Final = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} C[DS]T$")
+TIMESTAMP_RE: Final = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} C[DS]T")
 
 # Lifecycle from ledger/README.md. Order here is the main path, then side states.
 VALID_STATES: Final[tuple[str, ...]] = (
@@ -57,6 +57,7 @@ TASK_FIELDS: Final[tuple[str, ...]] = (
 JSON_FIELDS: Final[frozenset[str]] = frozenset(
     {"contract", "refs", "evidence", "blockers", "decisions_pending"}
 )
+MAPPING_FIELDS: Final[frozenset[str]] = frozenset({"contract", "refs"})
 SCALAR_FIELDS: Final[tuple[str, ...]] = tuple(
     f for f in TASK_FIELDS if f not in JSON_FIELDS
 )
@@ -91,7 +92,7 @@ def now_local() -> str:
 
 
 def check_timestamp(value: object, where: str) -> str:
-    if not isinstance(value, str) or not TIMESTAMP_RE.match(value):
+    if not isinstance(value, str) or not TIMESTAMP_RE.fullmatch(value):
         raise LedgerError(
             f"{where}: timestamp {value!r} is not 'YYYY-MM-DD HH:MM CDT|CST'"
         )
@@ -153,7 +154,14 @@ def validate_task(record: dict[str, Any], where: str) -> dict[str, Any]:
     check_timestamp(record["created"], f"{where}: created")
     check_timestamp(record["updated"], f"{where}: updated")
     for field in JSON_FIELDS:
-        _check_json_value(record[field], f"{where}: {field}")
+        value = record[field]
+        expected: type = dict if field in MAPPING_FIELDS else list
+        if value is not None and not isinstance(value, expected):
+            raise LedgerError(
+                f"{where}: field {field!r} must be a {expected.__name__} or null,"
+                f" got {type(value).__name__}"
+            )
+        _check_json_value(value, f"{where}: {field}")
     return {f: record[f] for f in TASK_FIELDS}
 
 
@@ -201,18 +209,24 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _canonical(value: Any) -> str:
+    # Key order is part of the content: the export reproduces it, so verify
+    # must notice when it changes. Only whitespace is normalized.
+    return json.dumps(value, sort_keys=False, ensure_ascii=False, separators=(",", ":"))
+
+
 def task_content_hash(record: dict[str, Any]) -> str:
-    """Canonical content hash of a task, independent of YAML formatting."""
-    canonical = json.dumps(
-        record, sort_keys=True, ensure_ascii=False, separators=(",", ":")
-    )
-    return sha256_bytes(canonical.encode("utf-8"))
+    """Content hash of a task, independent of YAML formatting but not of key order."""
+    return sha256_bytes(_canonical({f: record[f] for f in TASK_FIELDS}).encode("utf-8"))
 
 
 def events_content_hash(events: list[Event]) -> str:
-    """Canonical content hash of an ordered event sequence."""
-    canonical = "\n".join(
-        json.dumps(e.as_dict(), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-        for e in events
-    )
+    """Content hash of an ordered event sequence."""
+    canonical = "\n".join(_canonical(e.as_dict()) for e in events)
+    return sha256_bytes(canonical.encode("utf-8"))
+
+
+def transitions_content_hash(transitions: list[tuple[Any, ...]]) -> str:
+    """Content hash of an ordered (task, from_state, to_state, ts, source, event_seq) list."""
+    canonical = "\n".join(_canonical(list(t)) for t in transitions)
     return sha256_bytes(canonical.encode("utf-8"))

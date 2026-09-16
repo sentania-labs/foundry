@@ -49,3 +49,25 @@ def test_verify_still_passes_after_appending_a_new_event(imported: Path, cli: Ca
 def test_verify_without_import_is_nonzero(cli: Callable[..., int]) -> None:
     assert cli("init") == 0
     assert cli("verify") == 1
+
+
+def test_verify_fails_after_deleting_transitions(imported: Path, cli: Callable[..., int], db_path: Path) -> None:
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM state_transitions")
+    conn.commit()
+    assert cli("verify") == 1
+
+
+def test_verify_fails_after_reordering_json_keys(imported: Path, cli: Callable[..., int], db_path: Path) -> None:
+    conn = sqlite3.connect(db_path)
+    conn.execute("""UPDATE tasks SET contract = '{"verification": "x", "acceptance": "y"}' WHERE id = 'FDY-0003'""")
+    conn.commit()
+    assert cli("verify") == 1
+    conn.execute("""UPDATE tasks SET contract = '{"acceptance": "y", "verification": "x"}' WHERE id = 'FDY-0003'""")
+    conn.commit()
+    assert cli("verify") == 1  # still differs from the source content
+
+
+def test_verify_still_passes_after_adding_a_new_task(imported: Path, cli: Callable[..., int]) -> None:
+    assert cli("add", "--title", "later") == 0
+    assert cli("verify") == 0

@@ -39,7 +39,7 @@ def test_import_counts_and_manifest(imported: Path, db_path: Path) -> None:
     assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 8
     assert conn.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 17
     manifest = conn.execute("SELECT kind, record_count FROM import_manifest").fetchall()
-    assert sorted(manifest) == sorted([("task", 1)] * 8 + [("events", 17)])
+    assert sorted(manifest) == sorted([("task", 1)] * 8 + [("events", 17), ("transitions", 12)])
 
 
 def test_export_round_trip_equals_source(imported: Path, cli: Callable[..., int], tmp_path: Path) -> None:
@@ -133,3 +133,25 @@ def test_export_refuses_overwrite_without_force(imported: Path, cli: Callable[..
     assert cli("export", "--dir", str(out)) == 0
     assert cli("export", "--dir", str(out)) == 1
     assert cli("export", "--dir", str(out), "--force") == 0
+
+
+def test_import_rejects_blank_lines_crlf_and_missing_trailing_newline(cli: Callable[..., int], source: Path) -> None:
+    assert cli("init") == 0
+    events = source / "events.jsonl"
+    original = events.read_bytes()
+    for variant in (original + b"\n", original.replace(b"\n", b"\r\n", 1), original.rstrip(b"\n")):
+        events.write_bytes(variant)
+        assert cli("import", "--tasks", str(source / "tasks"), "--events", str(events)) == 1
+
+
+def test_import_rejects_stray_files_in_tasks_dir(cli: Callable[..., int], source: Path) -> None:
+    assert cli("init") == 0
+    (source / "tasks" / "FDY-0099.yml").write_text("id: FDY-0099\n")
+    assert cli("import", "--tasks", str(source / "tasks"), "--events", str(source / "events.jsonl")) == 1
+
+
+def test_import_rejects_wrong_json_field_shape(cli: Callable[..., int], source: Path) -> None:
+    assert cli("init") == 0
+    path = source / "tasks" / "FDY-0005.yaml"
+    path.write_text(path.read_text().replace("blockers: []", "blockers: proposed"))
+    assert cli("import", "--tasks", str(source / "tasks"), "--events", str(source / "events.jsonl")) == 1
