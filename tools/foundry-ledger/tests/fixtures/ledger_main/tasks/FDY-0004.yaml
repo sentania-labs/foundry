@@ -1,0 +1,21 @@
+id: FDY-0004
+title: Supervisor specification and contracts
+parent: null
+project: supervisor
+repository: /home/scott/devel/crucible (sentania-labs/crucible, public, MIT)
+scope: a new repository, location to be decided with Scott
+objective: Write the supervisor spec (Phase 2 step 1 and 2) from the bootstrap contract, delivery policy, and decision record 0001, ready to delegate.
+contract:
+  acceptance: spec covers task, worker, execution, event, artifact, and completion contracts; maps every readiness-gate item to a test
+  verification: Scott approves the spec before implementation is delegated
+model: claude-fable-5-1
+harness: claude-code
+execution: session 451a530d
+state: running
+created: "2026-09-15 23:58 CDT"
+updated: "2026-09-16 00:26 CDT"
+refs: {}
+last_report: null
+evidence: []
+blockers: []   # was FDY-0003, cleared 2026-09-16 00:02 CDT
+decisions_pending: []   # repo, language, license decided by Scott 2026-09-16

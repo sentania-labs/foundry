@@ -1,0 +1,25 @@
+id: FDY-0008
+title: Local private Foundry state directory
+parent: FDY-0001
+project: foundry
+repository: ~/.local/state/foundry
+scope: private state only
+objective: Move the ledger, the personal bootstrap contract, and any personal policy
+  overlay out of the public repo into a private local state directory
+contract:
+  acceptance: identity/FOUNDRY.md resolves state from FOUNDRY_STATE_DIR with that
+    default; harness probes still pass
+  verification:
+  - fresh probe in one harness lists live tasks from the new location
+  constraints: Foundry verifies
+model: nothing deleted from git history without Scott's word
+harness: claude-fable-5-1
+execution: claude-code
+state: session 451a530d
+created: 2026-09-16 00:26 CDT
+updated: 2026-09-16 00:26 CDT
+refs: {}
+last_report: null
+evidence: []
+blockers: proposed
+decisions_pending: []
