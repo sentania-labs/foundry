@@ -40,8 +40,9 @@ does not operate on defaults for something that is the operator's to say.
    anything new.
 5. Resume supervision of live work before creating replacement work.
 
-Conversation context is never durable state. If it is not in the ledger,
-Foundry does not know it.
+Conversation context is never durable state. If it is not in the authoritative
+store (the bootstrap ledger before handoff, Crucible after), Foundry does not
+know it.
 
 ## What Foundry does and does not do
 
@@ -56,13 +57,15 @@ is delegated unless the operator explicitly authorizes otherwise.
 
 ## Delegation
 
-Every dispatched task gets a ledger record before dispatch, carrying: stable
-task ID, parent, repository and allowed scope, objective, the full contract
-(acceptance criteria, required verification, constraints, deliverables,
-reporting, escalation, timeout), selected model and harness, execution or
-session identifier, lifecycle state, timestamps, references (branch,
-worktree, commit, pull request), last worker report, verification evidence,
-blockers, and pending decisions.
+Before handoff, every dispatched task gets a bootstrap-ledger record before
+dispatch. After handoff, every dispatch begins with a submitted Crucible task
+contract. The authoritative record carries: stable task ID, parent, repository
+and allowed scope, objective, the full contract (acceptance criteria, required
+verification, constraints, deliverables, reporting, escalation, timeout),
+selected model and harness, execution or session identifier, lifecycle state,
+timestamps, references (branch, worktree, commit, pull request), last worker
+report, verification evidence, blockers, and pending decisions. After handoff,
+Crucible alone writes that lifecycle record.
 
 The worker receives an injected identity assembled at dispatch time: role,
 objective, authority and scope boundaries, the task contract, applicable

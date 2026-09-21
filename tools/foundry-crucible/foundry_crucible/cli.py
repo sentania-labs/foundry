@@ -246,7 +246,17 @@ def _call_for(args: argparse.Namespace) -> Call:
 def _redact(text: str, token: str) -> str:
     if not token:
         return text
-    return text.replace(f"Bearer {token}", "Bearer [REDACTED]").replace(token, "[REDACTED]")
+    forms = {
+        token,
+        json.dumps(token, ensure_ascii=False)[1:-1],
+        urllib.parse.quote(token, safe=""),
+        urllib.parse.quote_plus(token, safe=""),
+    }
+    redacted = text
+    for form in sorted(forms, key=len, reverse=True):
+        if form:
+            redacted = redacted.replace(form, "[REDACTED]")
+    return redacted
 
 
 def _redact_document(document: Any, token: str) -> Any:
@@ -309,11 +319,18 @@ class Client:
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise Unreachable(_redact(str(exc), self.token)) from exc
         if not raw:
-            return None
+            raise ServerRefusal("Crucible returned an empty success response")
         try:
-            return json.loads(raw)
+            document = json.loads(raw)
         except ValueError as exc:
             raise ServerRefusal("Crucible returned a non-JSON response") from exc
+        if isinstance(document, dict) and "type" in document and "detail" in document:
+            raise ServerRefusal("Crucible returned a problem document with a 2xx status")
+        if not isinstance(document, dict) or not isinstance(document.get("schema_version"), str):
+            raise ServerRefusal(
+                "Crucible returned a 2xx response without a versioned resource envelope"
+            )
+        return document
 
 
 class ServerRefusal(Exception):
@@ -322,6 +339,28 @@ class ServerRefusal(Exception):
 
 class Unreachable(Exception):
     """Crucible could not be reached."""
+
+
+def _all_pages(client: Client, call: Call) -> Any:
+    document = client.request(call)
+    if not isinstance(document.get("items"), list) or "next_cursor" not in document:
+        raise ServerRefusal("Crucible returned a list without items and next_cursor")
+    items = list(document["items"])
+    cursor = document["next_cursor"]
+    seen: set[str] = set()
+    while cursor is not None:
+        if not isinstance(cursor, str) or not cursor or cursor in seen:
+            raise ServerRefusal("Crucible returned an invalid or repeated pagination cursor")
+        seen.add(cursor)
+        separator = "&" if "?" in call.path else "?"
+        page = client.request(
+            Call(call.method, f"{call.path}{separator}{urllib.parse.urlencode({'cursor': cursor})}")
+        )
+        if not isinstance(page.get("items"), list) or "next_cursor" not in page:
+            raise ServerRefusal("Crucible returned a page without items and next_cursor")
+        items.extend(page["items"])
+        cursor = page["next_cursor"]
+    return {**document, "items": items, "next_cursor": None}
 
 
 def _related(client: Client, args: argparse.Namespace, task: Any) -> Any:
@@ -335,7 +374,7 @@ def _related(client: Client, args: argparse.Namespace, task: Any) -> Any:
         return task
     result: dict[str, Any] = {"task": task}
     if args.events:
-        result["events"] = client.request(Call("GET", f"/tasks/{args.id}/events"))
+        result["events"] = _all_pages(client, Call("GET", f"/tasks/{args.id}/events"))
     if args.pull_request:
         result["pull_request"] = client.request(Call("GET", f"/tasks/{args.id}/pull-request"))
     if args.attempts:
@@ -439,7 +478,10 @@ def run(argv: Sequence[str] | None = None) -> int:
         base_url = _validate_base_url(base_url)
         call = _call_for(args)
         client = Client(base_url, token)
-        document = client.request(call, reason=getattr(args, "reason", None))
+        if args.command == "tasks" or (args.command == "wakes" and args.wakes_command is None):
+            document = _all_pages(client, call)
+        else:
+            document = client.request(call, reason=getattr(args, "reason", None))
         if args.command == "task":
             document = _related(client, args, document)
     except UsageError as exc:

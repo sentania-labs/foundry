@@ -112,6 +112,8 @@ def test_command_request_shapes(
     path: str,
     body: Any,
 ) -> None:
+    if argv[0] in {"tasks", "wakes"} and "ack" not in argv:
+        fake.response = {"schema_version": "1.0", "items": [], "next_cursor": None}
     assert run(argv) == 0
     request = fake.requests[-1]
     assert (request["method"], request["path"], request["body"]) == (method, path, body)
@@ -176,12 +178,20 @@ def test_every_mutation_refuses_without_reason(
 
 
 def test_task_related_flags_reach_all_records(fake: FakeCrucible) -> None:
-    fake.response = {
-        "schema_version": "1.0",
-        "id": "T1",
-        "latest_attempt": {"id": "A1"},
-        "executions": [{"attempts": [{"id": "A1"}]}],
-    }
+    fake.responses = [
+        {
+            "schema_version": "1.0",
+            "id": "T1",
+            "latest_attempt": {"id": "A1"},
+            "executions": [{"attempts": [{"id": "A1"}]}],
+        },
+        {"schema_version": "1.0", "items": [], "next_cursor": None},
+        {"schema_version": "1.0", "pull_request": None},
+        {"schema_version": "1.0", "id": "A1"},
+        {"schema_version": "1.0", "items": [], "next_cursor": None},
+        {"schema_version": "1.0", "attempt_id": "A1", "document": {}},
+        {"schema_version": "1.0", "items": [], "next_cursor": None},
+    ]
     assert (
         run(
             [
@@ -205,6 +215,44 @@ def test_task_related_flags_reach_all_records(fake: FakeCrucible) -> None:
         ("GET", "/v1/attempts/A1/gates"),
         ("GET", "/v1/attempts/A1/report"),
         ("GET", "/v1/attempts/A1/evidence"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("argv", "first_path", "second_path"),
+    [
+        (
+            ["tasks", "--state", "running"],
+            "/v1/tasks?state=running",
+            "/v1/tasks?state=running&cursor=NEXT",
+        ),
+        (["wakes"], "/v1/wakes", "/v1/wakes?cursor=NEXT"),
+    ],
+)
+def test_list_commands_follow_every_page(
+    fake: FakeCrucible,
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    first_path: str,
+    second_path: str,
+) -> None:
+    fake.responses = [
+        {
+            "schema_version": "1.0",
+            "items": [{"id": "FIRST"}],
+            "next_cursor": "NEXT",
+        },
+        {
+            "schema_version": "1.0",
+            "items": [{"id": "SECOND"}],
+            "next_cursor": None,
+        },
+    ]
+    assert run(argv) == 0
+    assert [request["path"] for request in fake.requests] == [first_path, second_path]
+    assert [item["id"] for item in json.loads(capsys.readouterr().out)["items"]] == [
+        "FIRST",
+        "SECOND",
     ]
 
 
@@ -311,11 +359,44 @@ def test_token_is_redacted_even_from_success_response(
     fake: FakeCrucible,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    fake.response = {"detail": f"server accidentally returned {TOKEN}"}
+    fake.response = {
+        "schema_version": "1.0",
+        "detail": f"server accidentally returned {TOKEN}",
+    }
     assert run(["health"]) == 0
     captured = capsys.readouterr()
     assert TOKEN not in captured.out + captured.err
     assert "[REDACTED]" in captured.out
+
+
+def test_json_escaped_token_is_redacted_from_error_response(
+    fake: FakeCrucible,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    token = 'abc"def\\ghi\t'
+    monkeypatch.setenv("CRUCIBLE_TOKEN", token)
+    fake.status = 400
+    fake.response = {"type": "refused", "detail": f"echo {token}"}
+    with pytest.raises(SystemExit) as raised:
+        run(["health"])
+    assert raised.value.code == 1
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    assert token not in output
+    assert json.dumps(token)[1:-1] not in output
+    assert "[REDACTED]" in output
+
+
+def test_problem_document_with_success_status_is_refused(
+    fake: FakeCrucible,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fake.response = {"type": "unauthorized", "detail": "denied"}
+    with pytest.raises(SystemExit) as raised:
+        run(["health"])
+    assert raised.value.code == 1
+    assert "problem document with a 2xx status" in capsys.readouterr().err
 
 
 def test_redirect_does_not_forward_token(
