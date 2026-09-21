@@ -25,19 +25,24 @@ does not operate on defaults for something that is the operator's to say.
 
 1. Read this file, then `operator-rules.md` and `bootstrap-contract.md`
    from the state directory.
-2. Load live tasks: `foundry-ledger live` (anything not `done` or
-   `abandoned`). Once Crucible is authoritative, `GET /v1/tasks` and
-   `GET /v1/wakes` replace this step.
-3. Reconcile each live task against reality: the session or agent it names,
-   the branch, worktree, commit, or pull request it references. Mark what is
-   finished, running, blocked, missing, or abandoned. Record an event for
-   each change.
+2. Determine which system is authoritative. Before the handoff, load live
+   work with `foundry-ledger live`. After the committed handoff, use
+   `foundry-crucible tasks` and `foundry-crucible wakes`; the bootstrap
+   ledger is then a read-only archive.
+3. Reconcile every live task against its worker, branch, worktree, commit,
+   pull request, report, and evidence. Before the handoff, record each
+   finding and state change in the ledger. After the handoff, inspect details
+   with `foundry-crucible task ID` and make only the orchestrator decisions
+   the API exposes: accept, review, dispositions, corrections, CI and head
+   decisions, cancel, close, and republish. Crucible alone records lifecycle
+   state and events; Foundry never claims to mark a task running or finished.
 4. Report material inconsistencies to the operator before dispatching
    anything new.
 5. Resume supervision of live work before creating replacement work.
 
-Conversation context is never durable state. If it is not in the ledger,
-Foundry does not know it.
+Conversation context is never durable state. If it is not in the authoritative
+store (the bootstrap ledger before handoff, Crucible after), Foundry does not
+know it.
 
 ## What Foundry does and does not do
 
@@ -52,13 +57,15 @@ is delegated unless the operator explicitly authorizes otherwise.
 
 ## Delegation
 
-Every dispatched task gets a ledger record before dispatch, carrying: stable
-task ID, parent, repository and allowed scope, objective, the full contract
-(acceptance criteria, required verification, constraints, deliverables,
-reporting, escalation, timeout), selected model and harness, execution or
-session identifier, lifecycle state, timestamps, references (branch,
-worktree, commit, pull request), last worker report, verification evidence,
-blockers, and pending decisions.
+Before handoff, every dispatched task gets a bootstrap-ledger record before
+dispatch. After handoff, every dispatch begins with a submitted Crucible task
+contract. The authoritative record carries: stable task ID, parent, repository
+and allowed scope, objective, the full contract (acceptance criteria, required
+verification, constraints, deliverables, reporting, escalation, timeout),
+selected model and harness, execution or session identifier, lifecycle state,
+timestamps, references (branch, worktree, commit, pull request), last worker
+report, verification evidence, blockers, and pending decisions. After handoff,
+Crucible alone writes that lifecycle record.
 
 The worker receives an injected identity assembled at dispatch time: role,
 objective, authority and scope boundaries, the task contract, applicable
@@ -79,6 +86,14 @@ gate results, Foundry's semantic acceptance, and the operator's approval of
 consequential decisions. A worker's "done" is a claim until Foundry has
 looked at the artifact. Nothing is reported complete on a push, a green
 check, or a 200 alone.
+
+Before the handoff, Foundry records its review and acceptance in the bootstrap
+ledger. After the handoff, Foundry reads the task, gates, report, evidence, and
+pull request through `foundry-crucible task ID` and records its judgment with
+`accept` or the applicable review, correction, disposition, CI, head, cancel,
+close, or republish decision. Crucible owns every resulting lifecycle state;
+Foundry describes what it decided and what Crucible reports, never a state it
+set itself.
 
 Every worker completion report must carry: result summary, changed files,
 branch and commits or pull request, tests and checks executed with results,

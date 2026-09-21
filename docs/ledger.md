@@ -40,3 +40,38 @@ See `tools/foundry-ledger/README.md`. The ones Foundry uses every session:
 bundle. Crucible imports, verifies counts and content hash, and commits it as
 authoritative; `foundry-ledger mark-migrated` then makes this database
 read-only. The procedure is specified in Crucible's repository.
+
+Run the handoff from the Foundry repository with an administrator operating
+Crucible locally. `HANDOFF_DIR` must be a new private temporary directory;
+`IMPORT_ID` is the id returned by submit.
+
+```sh
+cd tools/foundry-ledger
+uv run foundry-ledger export --format crucible --dir "$HANDOFF_DIR"
+
+cd /path/to/crucible
+uv run crucible-admin --reason "prepare authority handoff for verification" \
+  bootstrap submit \
+  --file "$HANDOFF_DIR/crucible.json" --owner foundry
+uv run crucible-admin bootstrap show "$IMPORT_ID"
+
+cd /path/to/foundry/tools/foundry-ledger
+uv run foundry-ledger verify
+
+# Stop here until the report's counts, state map, content hash, and field diff
+# match the export and the operator's verbatim authorization is recorded.
+cd /path/to/crucible
+uv run crucible-admin --reason "OPERATOR'S RECORDED WORDS" \
+  bootstrap commit "$IMPORT_ID"
+
+cd /path/to/foundry/tools/foundry-ledger
+uv run foundry-ledger mark-migrated --crucible-import "$IMPORT_ID"
+```
+
+Export and submit are reversible: a verified import is not yet authoritative.
+`bootstrap commit` is the irreversible authority handoff and requires the
+operator's verbatim words. `mark-migrated` is the irreversible local freeze;
+use the same recorded authorization and run it only after the committed
+import is visible through `foundry-crucible tasks`. After both steps,
+`foundry-crucible tasks`, `wakes`, and `task ID` replace bootstrap-ledger
+reads, and all operational decisions go through Crucible.
