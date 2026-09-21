@@ -55,8 +55,12 @@ uv run crucible-admin --reason "prepare authority handoff for verification" \
   --file "$HANDOFF_DIR/crucible.json" --owner foundry
 uv run crucible-admin bootstrap show "$IMPORT_ID"
 
+cd /path/to/foundry/tools/foundry-ledger
+uv run foundry-ledger verify
+
 # Stop here until the report's counts, state map, content hash, and field diff
 # match the export and the operator's verbatim authorization is recorded.
+cd /path/to/crucible
 uv run crucible-admin --reason "OPERATOR'S RECORDED WORDS" \
   bootstrap commit "$IMPORT_ID"
 
