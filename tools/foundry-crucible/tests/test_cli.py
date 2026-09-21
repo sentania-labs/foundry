@@ -305,3 +305,14 @@ def test_table_converts_timestamps_to_chicago(
 def test_default_output_is_json(fake: FakeCrucible, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["health"]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "ok"
+
+
+def test_token_is_redacted_even_from_success_response(
+    fake: FakeCrucible,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fake.response = {"detail": f"server accidentally returned {TOKEN}"}
+    assert run(["health"]) == 0
+    captured = capsys.readouterr()
+    assert TOKEN not in captured.out + captured.err
+    assert "[REDACTED]" in captured.out

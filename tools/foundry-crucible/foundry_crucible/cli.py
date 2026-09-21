@@ -249,10 +249,38 @@ def _redact(text: str, token: str) -> str:
     return text.replace(f"Bearer {token}", "Bearer [REDACTED]").replace(token, "[REDACTED]")
 
 
+def _redact_document(document: Any, token: str) -> Any:
+    if isinstance(document, str):
+        return _redact(document, token)
+    if isinstance(document, list):
+        return [_redact_document(value, token) for value in document]
+    if isinstance(document, dict):
+        return {
+            _redact(str(key), token): _redact_document(value, token)
+            for key, value in document.items()
+        }
+    return document
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        """Refuse redirects so a bearer token never crosses to another origin."""
+        return
+
+
 class Client:
     def __init__(self, base_url: str, token: str) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
+        self.opener = urllib.request.build_opener(_NoRedirect())
 
     def request(self, call: Call, *, reason: str | None = None) -> Any:
         data = None
@@ -270,7 +298,7 @@ class Client:
             f"{self.base_url}/v1{call.path}", data=data, headers=headers, method=call.method
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with self.opener.open(request, timeout=30) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             raw = exc.read().decode("utf-8", "replace")
@@ -420,6 +448,7 @@ def run(argv: Sequence[str] | None = None) -> int:
         _die(_redact(str(exc), token), 1)
     except Unreachable as exc:
         _die(_redact(str(exc), token), 3)
+    document = _redact_document(document, token)
     if args.table:
         _table(document)
     else:
