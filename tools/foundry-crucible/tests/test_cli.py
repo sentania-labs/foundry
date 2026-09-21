@@ -316,3 +316,21 @@ def test_token_is_redacted_even_from_success_response(
     captured = capsys.readouterr()
     assert TOKEN not in captured.out + captured.err
     assert "[REDACTED]" in captured.out
+
+
+def test_redirect_does_not_forward_token(
+    fake: FakeCrucible,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    destination = FakeCrucible()
+    try:
+        fake.status = 302
+        fake.response_headers["Location"] = f"{destination.url}/v1/health"
+        with pytest.raises(SystemExit) as raised:
+            run(["health"])
+        assert raised.value.code == 1
+        assert not destination.requests
+        captured = capsys.readouterr()
+        assert TOKEN not in captured.out + captured.err
+    finally:
+        destination.close()
