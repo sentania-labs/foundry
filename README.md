@@ -19,6 +19,7 @@ supervises through whatever delegation the active harness offers.
 identity/FOUNDRY.md      the portable, harness-neutral operating identity
 docs/                    delivery policy, ledger design, harness continuity
 tools/foundry-ledger/    the SQLite bootstrap ledger CLI
+tools/foundry-crucible/  the plain CLI for Crucible's orchestrator API
 examples/                a sanitized state directory and operator rules
 CLAUDE.md, AGENTS.md     one-line shims so each harness finds the identity
 ```
@@ -41,6 +42,10 @@ repository's `.gitignore` refuses. See `examples/state-dir/` for the layout.
 4. Start Claude Code, Codex, or AGY in the repository root. The shim points
    the harness at the identity, and the identity's start-of-session
    procedure loads your state.
+
+After the authority handoff, install `tools/foundry-crucible` with `uv sync`,
+set `CRUCIBLE_URL` and `CRUCIBLE_TOKEN` in the harness environment, and use it
+instead of writing to the archived bootstrap ledger.
 
 ## License
 

@@ -12,6 +12,13 @@ start-of-session procedure and list live tasks with their state. Do not
 write anything." Record the harness version, the command used, and the
 observed output in the state directory (not here).
 
+Before the authority handoff, the probe must use `foundry-ledger live`. After
+the handoff, it must use `foundry-crucible tasks`, `foundry-crucible wakes`,
+and `foundry-crucible task ID` for at least one live task. In both periods,
+compare the output with the authoritative store and check `git status` after
+the probe. After the handoff, also confirm the archived ledger remains frozen
+and do not use it to infer current state.
+
 ## Verified behaviors and findings (September 2026)
 
 | Harness | Discovery | Result |
